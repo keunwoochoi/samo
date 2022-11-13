@@ -16,8 +16,6 @@ from torch import Tensor
 from pytorch_model_summary import summary
 import os
 import json
-from importlib import import_module
-
 
 
 class GraphAttentionLayer(nn.Module):

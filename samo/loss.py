@@ -2,7 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from utils import uniform_hypersphere
+
+from samo.utils import uniform_hypersphere
+
 
 class OCSoftmax(nn.Module):
     def __init__(self, feat_dim=2, m_real=0.5, m_fake=0.2, alpha=20.0, fix_centers=True, initialize_centers="one_hot"):

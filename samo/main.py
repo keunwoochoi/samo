@@ -13,12 +13,13 @@ from torch import nn, Tensor
 from torch.utils.data import DataLoader, Subset
 from torchcontrib.optim import SWA
 
-from loss import SAMO, OCSoftmax
-from utils import setup_seed, seed_worker, cosine_annealing, adjust_learning_rate, em, compute_eer_tdcf
-from aasist.data_utils import genSpoof_list, ASVspoof2019_speaker_raw
+import samo.aasist.AASIST
+from samo.loss import SAMO, OCSoftmax
+from samo.utils import setup_seed, seed_worker, cosine_annealing, adjust_learning_rate, em, compute_eer_tdcf
+from samo.aasist.data_utils import genSpoof_list, ASVspoof2019_speaker_raw
 
 
-def initParams():
+def init_params():
     parser = argparse.ArgumentParser(description=__doc__)
 
     parser.add_argument('--seed', type=int, help="random number seed", default=10)
@@ -129,7 +130,8 @@ def initParams():
             os.mkdir(os.path.join(args.out_fold, 'checkpoint'))
 
         # Path for input data
-        assert os.path.exists(args.path_to_database)
+        if not os.path.exists(args.path_to_database):
+            raise RuntimeError(f'Path {args.path_to_database} does not exists!')
 
         # Save training arguments
         with open(os.path.join(args.out_fold, 'args.json'), 'w') as file:
@@ -147,17 +149,19 @@ def initParams():
 
     return args
 
+
 def get_loader(args):
-    '''
+    """
     Make PyTorch DataLoaders for train / developement / evaluation
     Adapted from https://github.com/clovaai/aasist
-    '''
+    """
 
     database_path = args.path_to_database
     seed = args.seed
     target_only = args.target
+    batch_size = args.batch_size
 
-    trn_database_path = database_path + "LA/ASVspoof2019_LA_train/"
+    trn_database_path = os.path.join(database_path, "LA/ASVspoof2019_LA_train/")
     dev_database_path = database_path + "LA/ASVspoof2019_LA_dev/"
     eval_database_path = database_path + "LA/ASVspoof2019_LA_eval/"
 
@@ -184,7 +188,7 @@ def get_loader(args):
     gen = torch.Generator()
     gen.manual_seed(seed)
     trn_loader = DataLoader(train_set,
-                            batch_size=args.batch_size,
+                            batch_size=batch_size,
                             shuffle=True,
                             drop_last=True,
                             pin_memory=True,
@@ -202,7 +206,7 @@ def get_loader(args):
     trn_bona_set = Subset(train_set_fix, range(num_bonafide_train))
     if args.center_sampler == "random":
         trn_bona = DataLoader(trn_bona_set,
-                              batch_size=args.batch_size,
+                              batch_size=batch_size,
                               shuffle=True,
                               drop_last=False,
                               pin_memory=True,
@@ -216,14 +220,16 @@ def get_loader(args):
                               pin_memory=True
                               # sampler=torch_sampler.SequentialSampler(range(num_bonafide_train))
                               )
+    else:
+        raise NotImplementedError
 
     # Read dev enrollment data
-    label_dev_enroll, file_dev_enroll, utt2spk_dev_enroll,tag_dev_enroll = genSpoof_list(dir_meta=dev_enroll_path, enroll=True,
+    label_dev_enroll, file_dev_enroll, utt2spk_dev_enroll, tag_dev_enroll = genSpoof_list(dir_meta=dev_enroll_path, enroll=True,
                                                                           train=False)
     dev_enroll_spk = set(utt2spk_dev_enroll.values())
     dev_centers = len(dev_enroll_spk)
-    print("no. validation enrollment files:", len(file_dev_enroll))
-    print("no. validation enrollment speakers:", dev_centers)
+    print(f"no. validation enrollment files: {len(file_dev_enroll)}")
+    print(f"no. validation enrollment speakers: {dev_centers}")
     dev_set_enroll = ASVspoof2019_speaker_raw(list_IDs=file_dev_enroll,
                                               labels=label_dev_enroll,
                                               utt2spk=utt2spk_dev_enroll,
@@ -239,7 +245,7 @@ def get_loader(args):
     # Read target-only dev data
     label_dev, file_dev, utt2spk_dev, tag_dev = genSpoof_list(dir_meta=dev_trial_path, enroll=False, train=False,
                                                      target_only=target_only, enroll_spk=dev_enroll_spk)
-    print("no. validation files:", len(file_dev))
+    print(f"no. validation files: {len(file_dev)}")
     dev_set = ASVspoof2019_speaker_raw(list_IDs=file_dev,
                                        labels=label_dev,
                                        utt2spk=utt2spk_dev,
@@ -253,12 +259,12 @@ def get_loader(args):
                             pin_memory=True)
 
     # Read eval enrollment data
-    label_eval_enroll, file_eval_enroll, utt2spk_eval_enroll,tag_eval_enroll = genSpoof_list(dir_meta=eval_enroll_path, enroll=True,
+    label_eval_enroll, file_eval_enroll, utt2spk_eval_enroll, tag_eval_enroll = genSpoof_list(dir_meta=eval_enroll_path, enroll=True,
                                                                              train=False)
     eval_enroll_spk = set(utt2spk_eval_enroll.values())
     eval_centers = len(eval_enroll_spk)
-    print("no. eval enrollment files:", len(file_eval_enroll))
-    print("no. eval enrollment speakers:", eval_centers)
+    print(f"no. eval enrollment files: {len(file_eval_enroll)}")
+    print(f"no. eval enrollment speakers: {eval_centers}")
     eval_set_enroll = ASVspoof2019_speaker_raw(list_IDs=file_eval_enroll,
                                                labels=label_eval_enroll,
                                                utt2spk=utt2spk_eval_enroll,
@@ -266,7 +272,7 @@ def get_loader(args):
                                                tag_list=tag_eval_enroll,
                                                train=False)
     eval_enroll = DataLoader(eval_set_enroll,
-                             batch_size=args.batch_size,
+                             batch_size=batch_size,
                              shuffle=False,
                              drop_last=False,
                              pin_memory=True)
@@ -274,7 +280,7 @@ def get_loader(args):
     # Read eval target-only data
     label_eval, file_eval, utt2spk_eval, tag_eval = genSpoof_list(dir_meta=eval_trial_path, enroll=False, train=False,
                                                         target_only=target_only, enroll_spk=eval_enroll_spk)
-    print("no. eval files:", len(file_eval))
+    print(f"no. eval files: {len(file_eval)}")
     eval_set = ASVspoof2019_speaker_raw(list_IDs=file_eval,
                                         labels=label_eval,
                                         utt2spk=utt2spk_eval,
@@ -282,47 +288,28 @@ def get_loader(args):
                                         tag_list=tag_eval,
                                         train=False)
     eval_loader = DataLoader(eval_set,
-                             batch_size=args.batch_size,
+                             batch_size=batch_size,
                              shuffle=False,
                              drop_last=False,
                              pin_memory=True)
 
     num_centers = [trn_centers, dev_centers, eval_centers]
 
-    return trn_loader, dev_loader, eval_loader, \
-           trn_bona, dev_enroll, eval_enroll, num_centers
+    return trn_loader, dev_loader, eval_loader, trn_bona, dev_enroll, eval_enroll, num_centers
 
-def train(args):
 
-    torch.set_default_tensor_type(torch.FloatTensor)
+def get_model(model_config):
+    arch_name = model_config["architecture"]  # todo
+    _model = aasist.AASIST.Model
 
-    # initialize backbone model AASIST
-    with open("aasist/AASIST.conf", "r") as f_json:
-        config = json.loads(f_json.read())
-    model_config = config["model_config"]
-    optim_config = config["optim_config"]
-    module = import_module("aasist.{}".format(model_config["architecture"]))
-    _model = getattr(module, "Model")
     feat_model = _model(model_config).to(args.device)
     nb_params = sum([param.view(-1).size()[0] for param in feat_model.parameters()])
     print("no. model params:{}".format(nb_params))
 
-    # Setup for DataParallel
-    print(torch.cuda.device_count())
-    if torch.cuda.device_count() > 1 and args.dp:
-        print("Let's use", torch.cuda.device_count(), "GPUs!")
-        feat_model = nn.DataParallel(feat_model)
-        feat_model.to(args.device)
+    return feat_model
 
-    # load datasets
-    trainDataLoader, devDataLoader, evalDataLoader, \
-    trainBonaLoader, devEnrollLoader, evalEnrollLoader, num_centers = get_loader(args)
 
-    # load previous models for continue training
-    if args.continue_training:
-        feat_model = torch.load(os.path.join(args.out_fold, 'checkpoint', 'anti-spoofing_feat_model_%d.pt' % args.checkpoint)).to(args.device)
-        loss_model = torch.load(os.path.join(args.out_fold, 'checkpoint', 'anti-spoofing_loss_model_%d.pt' % args.checkpoint)).to(args.device)
-
+def get_optimizer(optim_config, feat_model, total_steps, step_size_up):
     # optimizer & scheduler setup
     optim_config['base_lr'] = args.lr
     optim_config['lr_min'] = args.lr_min
@@ -331,8 +318,7 @@ def train(args):
                                  betas=optim_config['betas'],
                                  weight_decay=optim_config['weight_decay'],
                                  amsgrad=optim_config['amsgrad'])
-    total_steps = args.num_epochs * \
-                  len(trainDataLoader)
+
     if "cosine" in args.scheduler:
         if args.scheduler == "cosine2":
             total_steps = 2 * total_steps
@@ -348,22 +334,61 @@ def train(args):
             optimizer,
             base_lr=args.lr_min,
             max_lr=args.lr,
-            step_size_up=args.clr_step * len(trainDataLoader),
+            step_size_up=step_size_up,
             mode=args.clr_mode,
             cycle_momentum=False)
     optimizer_swa = SWA(optimizer)
-    n_swa_update = 0  # number of snapshots of model to use in SWA
+    return optimizer, optimizer_swa, scheduler
+
+
+def train(args):
+    final_test = args.final_test
+
+    torch.set_default_tensor_type(torch.FloatTensor)
+
+    # initialize backbone model AASIST
+    with open("aasist/AASIST.conf", "r") as f_json:
+        config = json.loads(f_json.read())
+
+    optim_config = config["optim_config"]
+
+    feat_model = get_model(model_config=config["model_config"])
+
+    # Setup for DataParallel
+    print(torch.cuda.device_count())
+    if torch.cuda.device_count() > 1 and args.dp:
+        print("Let's use", torch.cuda.device_count(), "GPUs!")
+        feat_model = nn.DataParallel(feat_model)
+        feat_model.to(args.device)
+
+    # load datasets
+    train_data_loader, dev_data_loader, evalDataLoader, \
+    trainBonaLoader, devEnrollLoader, evalEnrollLoader, num_centers = get_loader(args)
+
+    # load previous models for continue training
+    if args.continue_training:
+        feat_model = torch.load(os.path.join(args.out_fold, 'checkpoint', 'anti-spoofing_feat_model_%d.pt' % args.checkpoint)).to(args.device)
+        loss_model = torch.load(os.path.join(args.out_fold, 'checkpoint', 'anti-spoofing_loss_model_%d.pt' % args.checkpoint)).to(args.device)
+
+    # optimizer
+    optimizer, optimizer_swa, scheduler = get_optimizer(optim_config, feat_model,
+                              total_steps=args.num_epochs * len(train_data_loader),
+                              step_size_up=args.clr_step * len(train_data_loader))
 
     # loss setup
     criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor([0.9,0.1])).to(args.device)
-    if args.loss == "ocsoftmax":
+    monitor_loss = args.loss
+
+    if monitor_loss == "ocsoftmax":
         ocsoftmax = OCSoftmax(args.enc_dim, m_real=args.m_real, m_fake=args.m_fake, alpha=args.alpha, initialize_centers=args.initialize_centers).to(args.device)
         ocsoftmax.train()
         ocsoftmax_optimizer = torch.optim.SGD(ocsoftmax.parameters(), lr=args.lr)
-    elif args.loss == "samo":
+    elif monitor_loss == "samo":
         samo = SAMO(args.enc_dim, m_real=args.m_real, m_fake=args.m_fake, alpha=args.alpha,
                     num_centers=args.num_centers, initialize_centers=args.initialize_centers).to(args.device)
-    monitor_loss = args.loss
+        ocsoftmax_optimizer = None
+    else:
+        raise NotImplementedError(f"loss named {monitor_loss} is not implemented yet.")
 
     # early_stop setup
     early_stop_cnt = 0
@@ -371,23 +396,26 @@ def train(args):
     best_epoch = 0
 
     # Start training
+    n_swa_update = 0  # number of snapshots of model to use in SWA
+
     for epoch_num in tqdm(range(args.num_epochs)):
         feat_model.train()
 
         ip1_loader, idx_loader, spk_loader, utt_loader = [], [], [], []
-        trainlossDict = defaultdict(list)
+        train_loss_dict = defaultdict(list)
         devlossDict = defaultdict(list)
         testlossDict = defaultdict(list)
+
         if args.scheduler == "exp":
             adjust_learning_rate(args, args.lr, optimizer, epoch_num)
-        if args.loss == "ocsoftmax":
+        if monitor_loss == "ocsoftmax":
             adjust_learning_rate(args, args.lr, ocsoftmax_optimizer, epoch_num)
         print('\nEpoch: %d ' % (epoch_num + 1))
 
         # Setup SAMO attractors
-        if args.train_sp:
+        if args.train_sp and monitor_loss == 'samo':
             # Initialized centers
-            if epoch_num == 0 and args.init_center == 1: # one-hot initialization
+            if epoch_num == 0 and args.init_center == 1:  # one-hot initialization
                 spklist = ['LA_00' + str(spk_id) for spk_id in range(79, 99)]
                 tmp_center = torch.eye(args.enc_dim)[:num_centers[0]]
                 train_enroll = dict(zip(spklist, tmp_center))
@@ -397,53 +425,46 @@ def train(args):
             # Pass centers to loss
             samo.center = torch.stack(list(train_enroll.values()))
 
-        for i, (feat, labels, spk, utt, tag) in enumerate(tqdm(trainDataLoader)):
+        for i, (feat, labels, spk, utt, tag) in enumerate(tqdm(train_data_loader)):
             feat = feat.to(args.device)
             labels = labels.to(args.device)
 
-            ## forward
+            # forward
             feats, feat_outputs = feat_model(feat)
 
-            ## loss calculate
+            # loss calculate
             if args.train_sp:
                 samoloss, _ = samo(feats, labels, spk = spk, enroll = train_enroll, attractor = args.train_sp)
                 feat_loss = samoloss
-            elif args.loss == "softmax":
+            elif monitor_loss == "softmax":
                 feat_loss = criterion(feat_outputs, labels)
-            elif args.loss == "ocsoftmax":
+            elif monitor_loss == "ocsoftmax":
                 ocsoftmaxloss, _ = ocsoftmax(feats, labels)
                 feat_loss = ocsoftmaxloss
+            else:
+                raise NotImplementedError
 
-            ## backward
-            if args.loss == "softmax":
-                trainlossDict[args.loss].append(feat_loss.item())
-                optimizer.zero_grad()
-                feat_loss.backward()
-                optimizer.step()
-            elif args.loss == "ocsoftmax":
+            # backward
+            if monitor_loss == "ocsoftmax":
                 ocsoftmax_optimizer.zero_grad()
-                trainlossDict[args.loss].append(ocsoftmaxloss.item())
-                optimizer.zero_grad()
-                feat_loss.backward()
-                optimizer.step()
                 ocsoftmax_optimizer.step()
-            elif args.loss == "samo":
-                trainlossDict[args.loss].append(samoloss.item())
-                optimizer.zero_grad()
-                feat_loss.backward()
-                optimizer.step()
+
+            train_loss_dict[monitor_loss].append(feat_loss.item())
+            optimizer.zero_grad()
+            feat_loss.backward()
+            optimizer.step()
 
             # adjust lr in feat model optimizer in every iteration
             if args.scheduler != "exp":
                 scheduler.step()
 
-            ## record
+            # record
             ip1_loader.append(feats)
             idx_loader.append((labels))
 
             with open(os.path.join(args.out_fold, "train_loss.log"), "a") as log:
                 log.write(str(epoch_num) + "\t" + str(i) + "\t" +
-                          str(trainlossDict[monitor_loss][-1]) + "\n")
+                          str(train_loss_dict[monitor_loss][-1]) + "\n")
 
         if args.save_center:
             with open(os.path.join(args.out_fold, "train_enroll.log"), "a") as log:
@@ -460,7 +481,7 @@ def train(args):
                 dev_enroll = update_embeds(args.device, feat_model, devEnrollLoader)
                 samo.center = torch.stack(list(dev_enroll.values()))
 
-            for i, (feat, labels, spk, utt, tag) in enumerate(tqdm(devDataLoader)):
+            for i, (feat, labels, spk, utt, tag) in enumerate(tqdm(dev_data_loader)):
                 feat = feat.to(args.device)
                 labels = labels.to(args.device)
                 feats, feat_outputs = feat_model(feat)
@@ -470,21 +491,21 @@ def train(args):
                         samoloss, score = samo(feats, labels, spk, dev_enroll, args.val_sp)
                     else:
                         samoloss, score = samo.inference(feats, labels, spk, dev_enroll, args.val_sp)
-                    devlossDict[args.loss].append(samoloss.item())
-                elif args.loss == "softmax":
+                    devlossDict[monitor_loss].append(samoloss.item())
+                elif monitor_loss == "softmax":
                     feat_loss = criterion(feat_outputs, labels)
                     score = feat_outputs[:, 0]
-                    devlossDict[args.loss].append(feat_loss.item())
-                elif args.loss == "ocsoftmax":
+                    devlossDict[monitor_loss].append(feat_loss.item())
+                elif monitor_loss == "ocsoftmax":
                     ocsoftmaxloss, score = ocsoftmax(feats, labels)
-                    devlossDict[args.loss].append(ocsoftmaxloss.item())
-                elif args.loss == "samo":
+                    devlossDict[monitor_loss].append(ocsoftmaxloss.item())
+                elif monitor_loss == "samo":
                     # Use training centers when no enrollment(val_sp=0)
                     samoloss, score = samo(feats, labels)
-                    devlossDict[args.loss].append(samoloss.item())
+                    devlossDict[monitor_loss].append(samoloss.item())
 
                 ip1_loader.append(feats)
-                idx_loader.append((labels))
+                idx_loader.append(labels)
                 score_loader.append(score)
 
             scores = torch.cat(score_loader, 0).data.cpu().numpy()
@@ -528,17 +549,17 @@ def train(args):
                                 samoloss, score = samo(feats, labels, spk, eval_enroll, args.val_sp)
                             else:
                                 samoloss, score = samo.inference(feats, labels, spk, eval_enroll, args.val_sp)
-                            testlossDict[args.loss].append(samoloss.item())
-                        elif args.loss == "softmax":
+                            testlossDict[monitor_loss].append(samoloss.item())
+                        elif monitor_loss == "softmax":
                             feat_loss = criterion(feat_outputs, labels)
                             score = feat_outputs[:, 0]
-                            testlossDict[args.loss].append(feat_loss.item())
-                        elif args.loss == "ocsoftmax":
+                            testlossDict[monitor_loss].append(feat_loss.item())
+                        elif monitor_loss == "ocsoftmax":
                             ocsoftmaxloss, score = ocsoftmax(feats, labels)
-                            testlossDict[args.loss].append(ocsoftmaxloss.item())
-                        elif args.loss == "samo" or args.loss == "samo_spoofall":
+                            testlossDict[monitor_loss].append(ocsoftmaxloss.item())
+                        elif monitor_loss == "samo" or monitor_loss == "samo_spoofall":
                             samoloss, score = samo(feats, labels)
-                            testlossDict[args.loss].append(samoloss.item())
+                            testlossDict[monitor_loss].append(samoloss.item())
 
                         ip1_loader.append(feats)
                         idx_loader.append((labels))
@@ -561,34 +582,34 @@ def train(args):
         if (epoch_num + 1) % args.save_interval == 0:
             torch.save(feat_model, os.path.join(args.out_fold, 'checkpoint',
                                                 'anti-spoofing_feat_model_%d.pt' % (epoch_num + 1)))
-            if args.loss == "ocsoftmax":
+            if monitor_loss == "ocsoftmax":
                 loss_model = ocsoftmax
-            elif args.loss == "samo":
+            elif monitor_loss == "samo":
                 loss_model = samo
-            elif args.loss == "softmax":
+            elif monitor_loss == "softmax":
                 loss_model = None
             else:
-                print("What is your loss? You may encounter error.")
+                print(f"What is your loss? You may encounter error. {monitor_loss}??????")
             torch.save(loss_model, os.path.join(args.out_fold, 'checkpoint',
                                                 'anti-spoofing_loss_model_%d.pt' % (epoch_num + 1)))
 
         # save best model by lowest val loss
-        valLoss = np.nanmean(devlossDict[monitor_loss])
+        valLoss = np.nanmean(devlossDict[monitor_loss])  # todo rename
         if valLoss < prev_loss:
             torch.save(feat_model, os.path.join(args.out_fold, 'anti-spoofing_feat_model.pt'))
-            if args.loss == "ocsoftmax":
+            if monitor_loss == "ocsoftmax":
                 loss_model = ocsoftmax
-            elif args.loss == "samo" or args.loss == "samo_spoofall" or args.loss == "ocsoftmax_IDEAL" or args.loss == "samo_channel":
+            elif monitor_loss == "samo" or monitor_loss == "samo_spoofall" or monitor_loss == "ocsoftmax_IDEAL" or monitor_loss == "samo_channel":
                 loss_model = samo
-            elif args.loss == "softmax":
+            elif monitor_loss == "softmax":
                 loss_model = None
             else:
-                print("What is your loss? You may encounter error.")
+                print(f"What is your loss? You may encounter error. {monitor_loss}???")
             torch.save(loss_model, os.path.join(args.out_fold, 'anti-spoofing_loss_model.pt'))
 
             prev_loss = valLoss
             early_stop_cnt = 0
-            best_model_test_eer = eer
+            best_model_test_eer = eer  # todo
             best_epoch = epoch_num
             optimizer_swa.update_swa()
             n_swa_update += 1
@@ -600,17 +621,18 @@ def train(args):
                 res_file.write('\nTrained Epochs: %d\n' % (epoch_num - 49))
             break
 
-    if args.final_test:
+    if final_test:
         if args.save_score == None:
             args.save_score = args.out_fold[-8:]
         if args.scoring == None:
-            args.scoring = args.loss
-            if args.loss == "softmax":
+            args.scoring = monitor_loss
+            if monitor_loss == "softmax":
                 args.scoring == "fc"
         args.test_model = os.path.join(args.out_fold, 'anti-spoofing_feat_model.pt')
         test(args)
 
     print("Saving best model in epoch {}\n".format(best_epoch))
+
 
 def update_embeds(device, enroll_model, loader):
 
@@ -632,11 +654,11 @@ def update_embeds(device, enroll_model, loader):
 
     return enroll_emb_dict
 
+
 def test(args):
     torch.set_default_tensor_type(torch.FloatTensor)
-    if not os.path.exists('./test_scores'):
-        os.makedirs('./test_scores')
-    save_path = "./test_scores/{}.txt".format(args.save_score)
+    os.makedirs('./test_scores', exist_ok=True)
+    save_path = f"./test_scores/{args.save_score}.txt"
 
     if os.path.exists(save_path):
         print("Calculating on existing score file...\n")
@@ -649,7 +671,7 @@ def test(args):
                 config = json.loads(f_json.read())
             model_config = config["model_config"]
             module = import_module("aasist.{}".format(model_config["architecture"]))
-            _model = getattr(module, "Model")
+            _model = getattr(module, "Model")  # todo nonononono
             feat_model = _model(model_config).to(args.device)
 
             nb_params = sum([param.view(-1).size()[0] for param in feat_model.parameters()])
@@ -666,7 +688,7 @@ def test(args):
 
         # load test data and initialize loss
         # reverse [0,1] label when loading aasist pretrain
-        _, _, evalDataLoader, trainBonaLoader, _, evalEnrollLoader, _ = get_loader(args)
+        _, _, evalDataLoader, trainBonaLoader, _, evalEnrollLoader, _ = get_loader(args)  # no camels! xiao camel gou
 
         if args.scoring == "ocsoftmax":
             ocsoftmax = OCSoftmax(args.enc_dim, m_real=args.m_real, m_fake=args.m_fake, alpha=args.alpha,
@@ -713,7 +735,7 @@ def test(args):
                     _, score = ocsoftmax(feats, labels)
 
                 ip1_loader.append(feats)
-                idx_loader.append((labels))
+                idx_loader.append(labels)
                 score_loader.append(score)
                 utt_loader.extend(utt)
                 spk_loader.extend(spk)
@@ -726,7 +748,7 @@ def test(args):
         if args.save_score != None:
             with open(save_path, "w") as fh: # w as in overwrite mode
                 for utt, tag, score, label, spk in zip(utt_loader, tag_loader, scores, labels, spk_loader):
-                    fh.write("{} {} {} {} {}\n".format(utt, tag, label, score, spk))
+                    fh.write("{} {} {} {} {}\n".format(utt, tag, label, score, spk))  # use f string
             print("Scores saved to {}".format(save_path))
 
         print("Test EER: {}".format(eer))
@@ -736,7 +758,7 @@ def test(args):
 
 
 if __name__ == "__main__":
-    args = initParams()
+    args = init_params()
     # test on trained embeddings with enrollment
     if args.test_only:
         # generate similarity score and test_eer

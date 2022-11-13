@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 from torch_lr_finder import LRFinder, TrainDataLoaderIter
 
-from main import initParams, get_loader, update_embeds
+from main import init_params, get_loader, update_embeds
 from loss import SAMO
 
 
@@ -67,7 +67,7 @@ if __name__ == '__main__':
 
     nb_params = sum([param.view(-1).size()[0] for param in feat_model.parameters()])
     print("no. model params:{}".format(nb_params))
-    args = initParams()
+    args = init_params()
 
     # load datasets
     trainDataLoader, devDataLoader, evalDataLoader, \
