@@ -58,7 +58,7 @@ def adjust_learning_rate(args, lr, optimizer, epoch_num):
 
 # Compute eval metrics
 def compute_eer_tdcf(args, cm_score_file):
-    asv_score_file = os.path.join('scores/ASVspoof2019.LA.asv.eval.gi.trl.scores.txt')
+    asv_score_file = os.path.join('../scores/ASVspoof2019.LA.asv.eval.gi.trl.scores.txt')
 
     # Fix tandem detection cost function (t-DCF) parameters
     Pspoof = 0.05

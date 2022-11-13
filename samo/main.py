@@ -1,16 +1,22 @@
+import json
+import shutil
+import logging
 import argparse
 import os.path
-import shutil
-from torch.utils.data import DataLoader, Subset
+from importlib import import_module
 from collections import defaultdict
-from tqdm import tqdm
-from torchcontrib.optim import SWA
-import logging
 
-from loss import *
-from utils import *
-from aasist.AASIST import *
-from aasist.data_utils import *
+import numpy as np
+import torch
+from tqdm import tqdm
+from torch import nn, Tensor
+from torch.utils.data import DataLoader, Subset
+from torchcontrib.optim import SWA
+
+from loss import SAMO, OCSoftmax
+from utils import setup_seed, seed_worker, cosine_annealing, adjust_learning_rate, em, compute_eer_tdcf
+from aasist.data_utils import genSpoof_list, ASVspoof2019_speaker_raw
+
 
 def initParams():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -155,9 +161,9 @@ def get_loader(args):
     dev_database_path = database_path + "LA/ASVspoof2019_LA_dev/"
     eval_database_path = database_path + "LA/ASVspoof2019_LA_eval/"
 
-    trn_list_path = "protocols/ASVspoof2019.LA.cm.train.trn.txt"
-    dev_trial_path = "protocols/ASVspoof2019.LA.cm.dev.trl.txt"
-    eval_trial_path = "protocols/ASVspoof2019.LA.cm.eval.trl.txt"
+    trn_list_path = "../protocols/ASVspoof2019.LA.cm.train.trn.txt"
+    dev_trial_path = "../protocols/ASVspoof2019.LA.cm.dev.trl.txt"
+    eval_trial_path = "../protocols/ASVspoof2019.LA.cm.eval.trl.txt"
 
     dev_enroll_path = ["protocols/ASVspoof2019.LA.asv.dev.female.trn.txt",
                        "protocols/ASVspoof2019.LA.asv.dev.male.trn.txt"]
