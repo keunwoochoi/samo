@@ -13,7 +13,7 @@ from torch import nn, Tensor
 from torch.utils.data import DataLoader, Subset
 from torchcontrib.optim import SWA
 
-import samo.aasist.AASIST
+from samo.aasist import AASIST
 from samo.loss import SAMO, OCSoftmax
 from samo.utils import setup_seed, seed_worker, cosine_annealing, adjust_learning_rate, em, compute_eer_tdcf
 from samo.aasist.data_utils import genSpoof_list, ASVspoof2019_speaker_raw
@@ -42,7 +42,7 @@ def init_params():
     parser.add_argument('--lr_min', type=float, default=0.000005, help="min learning rate in cosine annealing")
     parser.add_argument('--lr_decay', type=float, default=0.95, help="decay learning rate for exponential schedule")
     parser.add_argument('--interval', type=int, default=1, help="interval to decay lr for exponential schedule")
-    parser.add_argument("--scheduler", type=str, default="cosine2", choices=["cosine","cosine2", "exp", "clr"])
+    parser.add_argument("--scheduler", type=str, default="cosine2", choices=["cosine", "cosine2", "exp", "clr"])
     parser.add_argument('--beta_1', type=float, default=0.9, help="bata_1 for Adam")
     parser.add_argument('--beta_2', type=float, default=0.999, help="beta_2 for Adam")
     parser.add_argument('--eps', type=float, default=1e-8, help="epsilon for Adam")
@@ -51,8 +51,9 @@ def init_params():
 
     # Loss setups
     parser.add_argument('-l', '--loss', type=str, default="ocsoftmax",
-                        choices=["softmax", "ocsoftmax","samo"], help="loss for training")
-    parser.add_argument('--num_centers', type=int, default=20, help="number of centers for the sub-center one-class loss")
+                        choices=["softmax", "ocsoftmax", "samo"], help="loss for training")
+    parser.add_argument('--num_centers', type=int, default=20,
+                        help="number of centers for the sub-center one-class loss")
     parser.add_argument('--initialize_centers', type=str, default="one_hot",
                         choices=["randomly", "evenly", "one_hot", "uniform"])
     parser.add_argument('--m_real', type=float, default=0.7, help="m_real for ocsoftmax/samo loss")
@@ -73,7 +74,8 @@ def init_params():
     parser.add_argument('--test_only', action='store_true', help='whether to run test once on chosen model')
     parser.add_argument("--test_model", type=str, default="./models/anti-spoofing_feat_model.pt")
     parser.add_argument("--scoring", type=str, default=None, choices=["fc", "samo", "ocsoftmax"])
-    parser.add_argument("--save_score", type=str, default=None, help='score file name to save individual score for each sample')
+    parser.add_argument("--save_score", type=str, default=None,
+                        help='score file name to save individual score for each sample')
     parser.add_argument('--save_center', action='store_true', help='whether to save centers as log files')
     parser.add_argument('--dp', action='store_true', default=False, help='use Data Parallel')
     parser.add_argument('--one_hot', action='store_true', help='use one hot vectors in final test')
@@ -224,8 +226,9 @@ def get_loader(args):
         raise NotImplementedError
 
     # Read dev enrollment data
-    label_dev_enroll, file_dev_enroll, utt2spk_dev_enroll, tag_dev_enroll = genSpoof_list(dir_meta=dev_enroll_path, enroll=True,
-                                                                          train=False)
+    label_dev_enroll, file_dev_enroll, utt2spk_dev_enroll, tag_dev_enroll = genSpoof_list(dir_meta=dev_enroll_path,
+                                                                                          enroll=True,
+                                                                                          train=False)
     dev_enroll_spk = set(utt2spk_dev_enroll.values())
     dev_centers = len(dev_enroll_spk)
     print(f"no. validation enrollment files: {len(file_dev_enroll)}")
@@ -244,7 +247,7 @@ def get_loader(args):
 
     # Read target-only dev data
     label_dev, file_dev, utt2spk_dev, tag_dev = genSpoof_list(dir_meta=dev_trial_path, enroll=False, train=False,
-                                                     target_only=target_only, enroll_spk=dev_enroll_spk)
+                                                              target_only=target_only, enroll_spk=dev_enroll_spk)
     print(f"no. validation files: {len(file_dev)}")
     dev_set = ASVspoof2019_speaker_raw(list_IDs=file_dev,
                                        labels=label_dev,
@@ -259,8 +262,9 @@ def get_loader(args):
                             pin_memory=True)
 
     # Read eval enrollment data
-    label_eval_enroll, file_eval_enroll, utt2spk_eval_enroll, tag_eval_enroll = genSpoof_list(dir_meta=eval_enroll_path, enroll=True,
-                                                                             train=False)
+    label_eval_enroll, file_eval_enroll, utt2spk_eval_enroll, tag_eval_enroll = genSpoof_list(dir_meta=eval_enroll_path,
+                                                                                              enroll=True,
+                                                                                              train=False)
     eval_enroll_spk = set(utt2spk_eval_enroll.values())
     eval_centers = len(eval_enroll_spk)
     print(f"no. eval enrollment files: {len(file_eval_enroll)}")
@@ -279,7 +283,7 @@ def get_loader(args):
 
     # Read eval target-only data
     label_eval, file_eval, utt2spk_eval, tag_eval = genSpoof_list(dir_meta=eval_trial_path, enroll=False, train=False,
-                                                        target_only=target_only, enroll_spk=eval_enroll_spk)
+                                                                  target_only=target_only, enroll_spk=eval_enroll_spk)
     print(f"no. eval files: {len(file_eval)}")
     eval_set = ASVspoof2019_speaker_raw(list_IDs=file_eval,
                                         labels=label_eval,
@@ -300,7 +304,7 @@ def get_loader(args):
 
 def get_model(model_config):
     arch_name = model_config["architecture"]  # todo
-    _model = aasist.AASIST.Model
+    _model = AASIST.Model
 
     feat_model = _model(model_config).to(args.device)
     nb_params = sum([param.view(-1).size()[0] for param in feat_model.parameters()])
@@ -337,7 +341,10 @@ def get_optimizer(optim_config, feat_model, total_steps, step_size_up):
             step_size_up=step_size_up,
             mode=args.clr_mode,
             cycle_momentum=False)
+    else:
+        raise NotImplementedError(f"what is your scheduler?? i have never heard of {args.scheduler}!")
     optimizer_swa = SWA(optimizer)
+
     return optimizer, optimizer_swa, scheduler
 
 
@@ -367,20 +374,25 @@ def train(args):
 
     # load previous models for continue training
     if args.continue_training:
-        feat_model = torch.load(os.path.join(args.out_fold, 'checkpoint', 'anti-spoofing_feat_model_%d.pt' % args.checkpoint)).to(args.device)
-        loss_model = torch.load(os.path.join(args.out_fold, 'checkpoint', 'anti-spoofing_loss_model_%d.pt' % args.checkpoint)).to(args.device)
+        feat_model = torch.load(
+            os.path.join(args.out_fold, 'checkpoint', 'anti-spoofing_feat_model_%d.pt' % args.checkpoint)).to(
+            args.device)
+        loss_model = torch.load(
+            os.path.join(args.out_fold, 'checkpoint', 'anti-spoofing_loss_model_%d.pt' % args.checkpoint)).to(
+            args.device)
 
     # optimizer
     optimizer, optimizer_swa, scheduler = get_optimizer(optim_config, feat_model,
-                              total_steps=args.num_epochs * len(train_data_loader),
-                              step_size_up=args.clr_step * len(train_data_loader))
+                                                        total_steps=args.num_epochs * len(train_data_loader),
+                                                        step_size_up=args.clr_step * len(train_data_loader))
 
     # loss setup
-    criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor([0.9,0.1])).to(args.device)
+    criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor([0.9, 0.1])).to(args.device)
     monitor_loss = args.loss
 
     if monitor_loss == "ocsoftmax":
-        ocsoftmax = OCSoftmax(args.enc_dim, m_real=args.m_real, m_fake=args.m_fake, alpha=args.alpha, initialize_centers=args.initialize_centers).to(args.device)
+        ocsoftmax = OCSoftmax(args.enc_dim, m_real=args.m_real, m_fake=args.m_fake, alpha=args.alpha,
+                              initialize_centers=args.initialize_centers).to(args.device)
         ocsoftmax.train()
         ocsoftmax_optimizer = torch.optim.SGD(ocsoftmax.parameters(), lr=args.lr)
     elif monitor_loss == "samo":
@@ -434,7 +446,7 @@ def train(args):
 
             # loss calculate
             if args.train_sp:
-                samoloss, _ = samo(feats, labels, spk = spk, enroll = train_enroll, attractor = args.train_sp)
+                samoloss, _ = samo(feats, labels, spk=spk, enroll=train_enroll, attractor=args.train_sp)
                 feat_loss = samoloss
             elif monitor_loss == "softmax":
                 feat_loss = criterion(feat_outputs, labels)
@@ -460,7 +472,7 @@ def train(args):
 
             # record
             ip1_loader.append(feats)
-            idx_loader.append((labels))
+            idx_loader.append(labels)
 
             with open(os.path.join(args.out_fold, "train_loss.log"), "a") as log:
                 log.write(str(epoch_num) + "\t" + str(i) + "\t" +
@@ -468,7 +480,7 @@ def train(args):
 
         if args.save_center:
             with open(os.path.join(args.out_fold, "train_enroll.log"), "a") as log:
-                log.write(str(epoch_num) + "\t" + str(samo.center.detach().numpy())+"\n")
+                log.write(str(epoch_num) + "\t" + str(samo.center.detach().numpy()) + "\n")
 
         # Val the model
         feat_model.eval()
@@ -486,8 +498,8 @@ def train(args):
                 labels = labels.to(args.device)
                 feats, feat_outputs = feat_model(feat)
 
-                if args.val_sp: # SAMO inference with enrollment
-                    if args.target: # loss calculation for target-only speakers
+                if args.val_sp:  # SAMO inference with enrollment
+                    if args.target:  # loss calculation for target-only speakers
                         samoloss, score = samo(feats, labels, spk, dev_enroll, args.val_sp)
                     else:
                         samoloss, score = samo.inference(feats, labels, spk, dev_enroll, args.val_sp)
@@ -515,12 +527,12 @@ def train(args):
             with open(os.path.join(args.out_fold, "dev_loss.log"), "a") as log:
                 log.write(str(epoch_num) + "\t" +
                           str(np.nanmean(devlossDict[monitor_loss])) + "\t" +
-                          str(eer) +"\n")
+                          str(eer) + "\n")
             print("Val EER: {}".format(eer))
 
         if args.save_center:
             with open(os.path.join(args.out_fold, "dev_enroll{}.log".format(epoch_num)), "a") as log:
-                log.write(str(epoch_num) + "\t" + str(samo.center.detach().numpy())+"\n")
+                log.write(str(epoch_num) + "\t" + str(samo.center.detach().numpy()) + "\n")
 
         # Test the current model
         feat_model.eval()
@@ -544,7 +556,7 @@ def train(args):
                         labels = labels.to(args.device)
                         feats, feat_outputs = feat_model(feat)
 
-                        if args.val_sp: # for SAMO
+                        if args.val_sp:  # for SAMO
                             if args.target:  # loss calculation for target-only speakers
                                 samoloss, score = samo(feats, labels, spk, eval_enroll, args.val_sp)
                             else:
@@ -570,13 +582,14 @@ def train(args):
                     eer = em.compute_eer(scores[labels == 0], scores[labels == 1])[0]
 
                     with open(os.path.join(args.out_fold, "test_loss.log"), "a") as log:
-                        log.write(str(epoch_num) + "\t" + str(np.nanmean(testlossDict[monitor_loss])) + "\t" + str(eer) + "\n")
+                        log.write(str(epoch_num) + "\t" + str(np.nanmean(testlossDict[monitor_loss])) + "\t" + str(
+                            eer) + "\n")
                     print("Test EER: {}".format(eer))
 
         # save centers per epoch
         if args.save_center:
             with open(os.path.join(args.out_fold, "eval_enroll{}.log".format(epoch_num)), "a") as log:
-                log.write(str(epoch_num) + "\t" + str(samo.center.detach().numpy())+"\n")
+                log.write(str(epoch_num) + "\t" + str(samo.center.detach().numpy()) + "\n")
 
         # save checkpoints
         if (epoch_num + 1) % args.save_interval == 0:
@@ -635,10 +648,9 @@ def train(args):
 
 
 def update_embeds(device, enroll_model, loader):
-
     enroll_emb_dict = {}
     with torch.no_grad():
-        for i, (batch_x, _, spk, _, _) in enumerate(tqdm(loader)): # batch_x = x_input, key = utt_list
+        for i, (batch_x, _, spk, _, _) in enumerate(tqdm(loader)):  # batch_x = x_input, key = utt_list
             batch_x = batch_x.to(device)
             batch_cm_emb, _ = enroll_model(batch_x)
             batch_cm_emb = batch_cm_emb.detach().cpu().numpy()
@@ -728,9 +740,9 @@ def test(args):
                         _, score = samo.inference(feats, labels, spk, eval_enroll, args.val_sp)
                 elif args.scoring == "fc":
                     if args.test_model[-3:] == "pth":
-                        score = feat_outputs[:, 1] # pretrained networks with reversed labels
+                        score = feat_outputs[:, 1]  # pretrained networks with reversed labels
                     else:
-                        score = feat_outputs[:, 0] # samo pretrained
+                        score = feat_outputs[:, 0]  # samo pretrained
                 elif args.scoring == "ocsoftmax":
                     _, score = ocsoftmax(feats, labels)
 
@@ -746,7 +758,7 @@ def test(args):
             eer = em.compute_eer(scores[labels == 0], scores[labels == 1])[0]
 
         if args.save_score != None:
-            with open(save_path, "w") as fh: # w as in overwrite mode
+            with open(save_path, "w") as fh:  # w as in overwrite mode
                 for utt, tag, score, label, spk in zip(utt_loader, tag_loader, scores, labels, spk_loader):
                     fh.write("{} {} {} {} {}\n".format(utt, tag, label, score, spk))  # use f string
             print("Scores saved to {}".format(save_path))
@@ -765,4 +777,3 @@ if __name__ == "__main__":
         test(args)
     else:
         train(args)
-
